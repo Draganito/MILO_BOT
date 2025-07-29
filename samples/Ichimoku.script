@@ -1,0 +1,45 @@
+# ichimoku.script
+# Dokumentation:
+# Dieses Script berechnet Ichimoku Cloud: Tenkan/Kijun-Sen, Senkou Span A/B (Cloud), Chikou Span.
+# Einstellung: coin = "Symbol" (z.B. BTCUSDT), timeframe = "Intervall" (z.B. 1h).
+# Condition: Long, wenn Close > Senkou A und A > B (Bullish Cloud).
+# Action: donothing (Testmodus).
+# Variablen: data (Kerzen-List), lastclose (aktueller Close).
+# Nutzen: Trend-Richtung, Support/Resistance via Cloud.
+# Risiken: Lagging in schnellen Märkten, falsche Breaks.
+# Berechnung: Tenkan/Kijun = (High+Low)/2 über Perioden, Senkou A = (Tenkan+Kijun)/2, B = (High+Low)/2 über länger, Chikou = Close shifted.
+coin = "BTCUSDT"
+timeframe = "1h"
+
+def calculate_ichimoku(data, tenkan_period=9, kijun_period=26, senkou_period=52):
+    highs = [c["high"] for c in data]
+    lows = [c["low"] for c in data]
+    tenkan = []
+    kijun = []
+    for i in range(len(data)):
+        if i < max(tenkan_period, kijun_period, senkou_period) - 1:
+            tenkan.append(math.nan)
+            kijun.append(math.nan)
+            continue
+        tenkan_high = max(highs[max(0, i - tenkan_period + 1):i + 1])
+        tenkan_low = min(lows[max(0, i - tenkan_period + 1):i + 1])
+        tenkan.append((tenkan_high + tenkan_low) / 2)
+        kijun_high = max(highs[max(0, i - kijun_period + 1):i + 1])
+        kijun_low = min(lows[max(0, i - tenkan_period + 1):i + 1])
+        kijun.append((kijun_high + kijun_low) / 2)
+    senkou_a = [(t + k) / 2 for t, k in zip(tenkan, kijun)]
+    senkou_b = []
+    for i in range(len(data)):
+        if i < senkou_period - 1:
+            senkou_b.append(math.nan)
+            continue
+        sb_high = max(highs[max(0, i - senkou_period + 1):i + 1])
+        sb_low = min(lows[max(0, i - senkou_period + 1):i + 1])
+        senkou_b.append((sb_high + sb_low) / 2)
+    chikou = [data[i - kijun_period]["close"] if i >= kijun_period else math.nan for i in range(len(data))]
+    return tenkan, kijun, senkou_a, senkou_b, chikou
+
+tenkan, kijun, senkou_a, senkou_b, chikou = calculate_ichimoku(data)
+condition_true = lastclose > senkou_a[-1] and senkou_a[-1] > senkou_b[-1]
+action_if_true = "donothing"
+print(f"Tenkan: {tenkan[-1]:.4f}, Kijun: {kijun[-1]:.4f}, Senkou A: {senkou_a[-1]:.4f}, Senkou B: {senkou_b[-1]:.4f}, Chikou: {chikou[-1]:.4f}")

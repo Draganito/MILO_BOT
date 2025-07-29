@@ -1,0 +1,7 @@
+timeframe = "1m"
+coin = "BTCUSDT"
+
+condition_true = True
+
+action_if_true = "long(1%risk@50x)"
+action_if_false = "donothing"

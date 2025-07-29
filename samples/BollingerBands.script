@@ -1,0 +1,40 @@
+# bollinger.script
+# Dokumentation:
+# Dieses Script berechnet Bollinger Bands: Mittelband (SMA), Upper/Lower Bands (± StdDev).
+# Einstellung: coin = "Symbol" (z.B. BTCUSDT), timeframe = "Intervall" (z.B. 1h).
+# Condition: Long, wenn Bands eng (Squeeze < 5% SMA).
+# Action: donothing (Testmodus).
+# Variablen: data (Kerzen-List), lastclose (aktueller Close).
+# Nutzen: Identifiziert Volatilitäts-Breakouts.
+# Risiken: Falsche Signale in Sideways-Märkten.
+# Berechnung: SMA über Period, StdDev pro Fenster.
+coin = "BTCUSDT"
+timeframe = "1h"
+
+def calculate_bollinger_bands(data, period=20, std_dev=2.0):
+    # Berechne SMA (Mittelband)
+    sma = []
+    for i in range(len(data)):
+        start = max(0, i - period + 1)
+        slice_data = [c["close"] for c in data[start:i+1]]
+        sma.append(sum(slice_data) / len(slice_data) if slice_data else math.nan)
+    # Berechne Upper/Lower Bands
+    upper = []
+    lower = []
+    for i in range(len(data)):
+        if i < period - 1:
+            upper.append(math.nan)
+            lower.append(math.nan)
+            continue
+        slice_data = [c["close"] for c in data[i - period + 1:i + 1]]
+        mean = sum(slice_data) / period
+        variance = sum((x - mean) ** 2 for x in slice_data) / period
+        stdev = math.sqrt(variance)
+        upper.append(mean + std_dev * stdev)
+        lower.append(mean - std_dev * stdev)
+    return sma, upper, lower
+
+sma, upper, lower = calculate_bollinger_bands(data)
+condition_true = (upper[-1] - lower[-1]) < sma[-1] * 0.05
+action_if_true = "donothing"
+print(f"SMA: {sma[-1]:.4f}, Upper: {upper[-1]:.4f}, Lower: {lower[-1]:.4f}")

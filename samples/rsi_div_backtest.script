@@ -1,0 +1,122 @@
+timeframe = "1m"
+coin = "BTCUSDT"
+condition_true = False
+action_if_true = "donothing"
+action_if_false = "donothing"
+
+# Parameters
+rsi_period = 14
+lookback = 20
+MMR = 0.004
+RISK_PERCENT = 50
+LEVERAGE = 30
+TP_PERCENT = 0.5
+TAKER_FEE = 0.0004
+SLIPPAGE = 0.0002  # 0.02% Slippage/Spread
+
+# Symbol constraints for BTCUSDT (hardcoded, typical Binance values)
+MIN_QTY = 0.001
+MIN_NOTIONAL = 5.0
+STEP_SIZE = 0.001
+QTY_PRECISION = 3
+
+trades = []
+equity = 100  # Sehr niedriges Startkapital
+open_position = None
+
+def calculate_liquidation_price(side, entry_price, leverage, notional):
+    mmr = MMR
+    if side == 'LONG':
+        return entry_price * (1 - 1 / leverage + mmr)
+    return entry_price * (1 + 1 / leverage - mmr)
+
+for i in range(max(lookback + rsi_period, 1), len(data)):
+    window = data[:i+1]
+    last_candle = window[-1]
+    
+    rsi = (await calculate_rsi(window, rsi_period))
+    zigzag_points = (await calculate_zigzag(window))
+    divergences = (await detect_divergences(rsi, zigzag_points, window, lookback, 0))
+    
+    # Trade-Auslöser: Versteckte bullische Divergenz
+    if any(div['type'] == 'hidden_bullish' for div in divergences) and not open_position:
+        risk_amount = equity * RISK_PERCENT / 100
+        if risk_amount * LEVERAGE < MIN_NOTIONAL:
+            print(f"Trade skipped: Risk amount {risk_amount:.2f} * leverage {LEVERAGE}x = {risk_amount * LEVERAGE:.2f} below minNotional {MIN_NOTIONAL:.2f} for BTCUSDT")
+            continue
+        notional = risk_amount * LEVERAGE
+        position_size = notional
+        entry_price = last_candle['close'] * (1 + SLIPPAGE)
+        
+        # Calculate quantity with constraints
+        qty = position_size / entry_price
+        effective_min_qty = max(MIN_QTY, MIN_NOTIONAL / entry_price)
+        if qty < effective_min_qty:
+            print(f"Trade skipped: Quantity {qty:.6f} below effective minimum {effective_min_qty:.6f} for BTCUSDT")
+            continue
+        steps = math.floor(qty / STEP_SIZE)
+        qty = steps * STEP_SIZE
+        qty = round(qty, QTY_PRECISION)
+        adjusted_position_size = qty * entry_price
+        if adjusted_position_size < MIN_NOTIONAL:
+            print(f"Trade skipped: Adjusted position size {adjusted_position_size:.2f} below minNotional {MIN_NOTIONAL:.2f} for BTCUSDT")
+            continue
+        
+        tp_price = entry_price * (1 + TP_PERCENT / 100)
+        liq_price = calculate_liquidation_price('LONG', entry_price, LEVERAGE, notional)
+        open_position = {
+            'entry_price': entry_price,
+            'qty': qty,
+            'margin': risk_amount,
+            'tp': tp_price,
+            'liq': liq_price,
+            'entry_time': last_candle['time'],
+            'side': 'LONG'
+        }
+        equity -= risk_amount
+        print(f"Trade Opened: Side={open_position['side']}, Entry Time={open_position['entry_time']}, Entry Price={open_position['entry_price']:.2f}, Quantity={open_position['qty']:.6f}, Take-Profit={open_position['tp']:.2f}, Liquidation Price={open_position['liq']:.2f}, Margin={open_position['margin']:.2f}, Leverage={LEVERAGE}x")
+    
+    if open_position:
+        current_price = last_candle['close']
+        current_low = last_candle['low']
+        current_high = last_candle['high']
+        exit_price = None
+        exit_reason = None
+        if current_low <= open_position['liq']:
+            exit_price = open_position['liq']
+            exit_reason = 'LIQUIDATION'
+        elif current_high >= open_position['tp']:
+            exit_price = open_position['tp']
+            exit_reason = 'TP'
+        
+        if exit_price:
+            if exit_reason == 'LIQUIDATION':
+                profit = -open_position['margin']
+            else:
+                pnl = (exit_price - open_position['entry_price']) * open_position['qty']
+                position_size = open_position['qty'] * open_position['entry_price']
+                fees = position_size * TAKER_FEE * 2
+                profit = pnl - fees
+            equity += open_position['margin'] + profit
+            trade = {
+                'entry_time': open_position['entry_time'],
+                'exit_time': last_candle['time'],
+                'entry_price': open_position['entry_price'],
+                'exit_price': exit_price,
+                'profit': profit,
+                'reason': exit_reason,
+                'side': open_position['side'],
+                'quantity': open_position['qty'],
+                'margin': open_position['margin'],
+                'tp': open_position['tp'],
+                'liq': open_position['liq']
+            }
+            trades.append(trade)
+            print(f"Trade Closed: Side={trade['side']}, Entry Time={trade['entry_time']}, Exit Time={trade['exit_time']}, Entry Price={trade['entry_price']:.2f}, Exit Price={trade['exit_price']:.2f}, Quantity={trade['quantity']:.6f}, Profit={trade['profit']:.2f}, Reason={trade['reason']}, Take-Profit={trade['tp']:.2f}, Liquidation Price={trade['liq']:.2f}, Margin={trade['margin']:.2f}")
+            open_position = None
+
+total_trades = len(trades)
+wins = sum(1 for t in trades if t['profit'] > 0)
+win_rate = wins / total_trades if total_trades > 0 else 0
+total_profit = sum(t['profit'] for t in trades)
+print(f"Backtest Results: Trades={total_trades}, Win Rate={win_rate:.2%}, Profit={total_profit:.2f}")

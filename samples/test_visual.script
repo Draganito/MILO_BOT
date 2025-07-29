@@ -1,0 +1,6 @@
+coin = "BTCUSDT"
+timeframe = "15m"
+
+condition_true = False
+action_if_true = "donothing"
+action_if_false = "donothing"
